@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Monitoring du Serveur</title>
+</head>
+<body>
+    <h1>Monitoring du Serveur de Chat</h1>
+    <p id="status">Statut : En attente de l'affectation des rooms</p>
+    <button onclick="disconnectAllUsers()">Déconnecter tous les utilisateurs</button> <!-- Nouveau bouton -->
+
+    <h2>Rooms</h2>
+    <div id="rooms">
+        <!-- Les informations des rooms seront affichées ici -->
+    </div>
+    <h2>Moniteurs Connectés</h2>
+    <div id="monitors">
+        <!-- Les informations des clients de monitoring seront affichées ici -->
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io('http://localhost:3000'); // Adapter l'URL au serveur
+
+        // Signaler au serveur qu'il s'agit du client de monitoring avec un pseudo unique
+        socket.emit('joinMonitor', { id: 'monitor_client' });
+
+        // Écouter le statut du serveur
+        socket.on('serverStatus', (data) => {
+            document.getElementById('status').textContent = `Statut : ${data.status}`;
+            
+            const roomsDiv = document.getElementById('rooms');
+            roomsDiv.innerHTML = ""; // Réinitialiser l'affichage des rooms
+
+            data.rooms.forEach(room => {
+                const roomDiv = document.createElement('div');
+                roomDiv.innerHTML = `<h3>Room ID : ${room.roomId}</h3><p>Utilisateurs : ${room.users.join(', ')}</p>`;
+                roomsDiv.appendChild(roomDiv);
+            });
+
+            // Afficher les moniteurs connectés
+            const monitorsDiv = document.getElementById('monitors');
+            monitorsDiv.innerHTML = ""; // Réinitialiser l'affichage des moniteurs
+            data.monitors.forEach(monitorId => {
+                const monitorDiv = document.createElement('div');
+                monitorDiv.textContent = `Client de monitoring connecté avec ID : ${monitorId}`;
+                monitorsDiv.appendChild(monitorDiv);
+            });
+        });
+
+        // Fonction pour déconnecter tous les utilisateurs
+        function disconnectAllUsers() {
+            socket.emit('disconnectAllUsers'); // Émettre l'événement de déconnexion
+        }
+    </script>
+</body>
+</html>

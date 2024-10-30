@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Chat Room</title>
+</head>
+<body>
+    <h1>Room de Chat : <span id="room-name"></span></h1> <!-- Affiche le nom de la room -->
+    <div id="chat"></div>
+    <input type="text" id="message" placeholder="Tapez votre message ici">
+    <button onclick="sendMessage()">Envoyer</button>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io('http://localhost:3000');
+
+        // Récupérer le roomId depuis l'URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const roomId = urlParams.get('room');
+
+        if (roomId) {
+            document.getElementById('room-name').textContent = roomId; // Affiche le nom de la room
+
+            // Rejoindre la room spécifiée
+            socket.emit('joinRoom', roomId);
+
+            // Écouter les messages de la room
+            socket.on('chat message', (data) => {
+                const chat = document.getElementById('chat');
+                const messageElement = document.createElement('p');
+                messageElement.textContent = `${data.user}: ${data.message}`;
+                chat.appendChild(messageElement);
+            });
+        } else {
+            alert("Erreur : room non attribuée.");
+        }
+
+        // Écouter l'événement de redirection pour renvoyer l'utilisateur vers index.html
+        socket.on('redirect', (url) => {
+            console.log("Redirection vers : ", url); // Log pour vérifier la réception
+            window.location.href = url;
+        });
+
+        // Envoyer un message à la room
+        function sendMessage() {
+            const message = document.getElementById('message').value;
+            if (message.trim() && roomId) { // Vérifier que le message n'est pas vide et que roomId est défini
+                socket.emit('chat message', { room: roomId, message });
+                document.getElementById('message').value = ''; // Effacer le champ après envoi
+            }
+        }
+        
+        // Avertissement en cas de tentative de fermeture de la fenêtre
+        window.addEventListener('beforeunload', (event) => {
+            event.preventDefault(); // Certaines versions de navigateurs nécessitent cela
+            event.returnValue = ''; // Standard pour déclencher l'alerte de confirmation
+        });        
+        
+    </script>
+</body>
+</html>

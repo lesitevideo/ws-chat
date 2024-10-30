@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Attente - Chat</title>
+</head>
+<body>
+    <h1 id="status">Début à 11h</h1>
+    <p id="message">Merci de patienter pendant votre affectation à une room...</p>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io('http://localhost:3000'); // Connexion au serveur Node.js
+
+        // Afficher le message de début
+        socket.on('waiting', () => {
+            document.getElementById('status').textContent = "Début à 11h";
+        });
+
+        // Message d'affectation
+        socket.on('assigningRoom', () => {
+            document.getElementById('status').textContent = "Merci de patienter pendant votre affectation à une room";
+        });
+
+        // Rediriger vers chat.html en incluant le roomId dans l'URL
+        socket.on('roomAssigned', (data) => {
+            window.location.href = `chat.html?room=${data.roomId}`;
+        });
+    </script>
+</body>
+</html>
