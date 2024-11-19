@@ -1,13 +1,5 @@
 # ws-chat
 
-git clone https://github.com/lesitevideo/ws-chat
-
-cd ws-chat
-
-npm install
-
-npm start
-
 1/ users arrive on the webpage. A cookie is used to pass his credentials :
 user_ID, username, user_uai, user_ips, user_genre
 
