@@ -15,6 +15,8 @@ user_ips = (float) school social range
 
 user_genre = (string) h or f
 
+user_avatar = (string) avatar picture name on the server
+
 =>
 <pre><code>
 socket = io('https://mywsdomain.tld:3001', {
@@ -29,6 +31,7 @@ socket = io('https://mywsdomain.tld:3001', {
     user_uai: currentUser.user_uai,
     user_ips: currentUser.user_ips,
     user_genre: currentUser.user_genre,
+    user_avatar: currentUser.user_avatar
   },
 });
 </code></pre>
