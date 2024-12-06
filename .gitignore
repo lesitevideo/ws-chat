@@ -1,0 +1,9 @@
+# .gitignore
+
+# Ignore node_modules directory
+node_modules/
+
+# Other files and directories to ignore
+dist/
+.env
+.DS_Store
