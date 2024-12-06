@@ -19,6 +19,7 @@ class Team {
                 user_uai: userData.user_uai,
                 user_ips: userData.user_ips,
                 user_genre: userData.user_genre,
+                user_avatar: userData.user_avatar,
             },
         });
         this.uais.add(String(userData.user_uai));
@@ -39,6 +40,7 @@ class Team {
                 user_uai: userData.user_uai,
                 user_ips: userData.user_ips,
                 user_genre: userData.user_genre,
+                user_avatar: userData.user_avatar,
             },
         });
         this.uais.add(String(userData.user_uai));
@@ -74,7 +76,7 @@ class Team {
                 user_uai: user.userData.user_uai,
                 user_ips: user.userData.user_ips,
                 user_genre: user.userData.user_genre,
-
+                user_avatar: user.userData.user_avatar,
             })
             return groups;
         }, []);
