@@ -3,6 +3,8 @@
 # Ignore node_modules directory
 node_modules/
 
+package-lock.json
+
 # Other files and directories to ignore
 dist/
 .env
