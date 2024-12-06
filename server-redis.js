@@ -1,12 +1,23 @@
 import cluster from 'cluster';
 import os from 'os';
 import https from 'https';
-import { Server } from 'socket.io';
+import {
+    Server
+} from 'socket.io';
 import fs from 'fs';
-import { v4 as uuidv4 } from 'uuid';
+import {
+    v4 as uuidv4
+} from 'uuid';
 import Redis from 'ioredis';
-import { createAdapter } from '@socket.io/redis-adapter';
+import {
+    createAdapter
+} from '@socket.io/redis-adapter';
 import Team from './models/Team.js';
+import {
+    matchmakingProgress,
+    MAX_TEAM_SIZE,
+    MIN_TEAM_SIZE
+} from './matchmaking.js';
 
 const numCPUs = os.cpus().length;
 console.log(`${numCPUs} CPUs sur le serveur`);
@@ -38,8 +49,15 @@ if (cluster.isMaster) {
     // Configuration de Redis
     const redisHost = '127.0.0.1';
     const redisPort = 6379;
-    const pubClient = new Redis({ host: redisHost, port: redisPort });
+    const pubClient = new Redis({
+        host: redisHost,
+        port: redisPort
+    });
     const subClient = pubClient.duplicate();
+
+    pubClient.on('error', (err) => {
+        console.error('Redis Client Error:', err);
+    });
 
     // Serveur HTTPS
     const server = https.createServer(options);
@@ -53,140 +71,232 @@ if (cluster.isMaster) {
     });
     io.adapter(createAdapter(pubClient, subClient));
 
-    const MAX_TEAM_SIZE = 4;
-    const MIN_TEAM_SIZE = 3;
     const port = 3001;
     let gameStarted = false;
 
     const monitors = new Set();
     const adminUserIds = [1, 42, 99];
 
-async function assignRooms() {
-    const waitingUsers = (await pubClient.lrange('waitingUsers', 0, -1)).map(JSON.parse);
-    if (waitingUsers.length === 0) return;
+    async function assignRooms() {
+        const waitingUsers = (await pubClient.lrange('waitingUsers', 0, -1)).map(JSON.parse);
+        if (waitingUsers.length === 0) return;
 
-    await pubClient.del('waitingUsers'); // Supprime les utilisateurs en attente après leur traitement
+        await pubClient.del('waitingUsers'); // Supprime les utilisateurs en attente après leur traitement
 
-    // Exclure les administrateurs
-    const filteredUsers = waitingUsers.filter(user => !adminUserIds.includes(user.user_id));
+        // Exclure les administrateurs
+        const filteredUsers = waitingUsers.filter(user => !adminUserIds.includes(user.user_id));
 
-    if (filteredUsers.length === 0) {
-        console.log("Aucun utilisateur à assigner après le filtrage des administrateurs.");
-        return;
-    }
-
-    const teams = [];
-    let unassignedUsers = [...filteredUsers];
-
-    // Mélanger les utilisateurs
-    unassignedUsers.sort(() => Math.random() - 0.5);
-
-    // Créer des équipes complètes (MAX_TEAM_SIZE)
-    while (unassignedUsers.length >= MAX_TEAM_SIZE) {
-        const roomId = uuidv4();
-        const team = new Team(roomId);
-
-        for (let i = 0; i < MAX_TEAM_SIZE; i++) {
-            const user = unassignedUsers.pop();
-            team.addMember(user);
-            io.to(user.socketId).socketsJoin(roomId);
-            io.to(user.socketId).emit('roomAssigned', { roomId });
-            
-            // Sauvegarder l'utilisateur dans Redis pour recherche rapide
-            await pubClient.hset('userToRoom', user.user_id, roomId);
+        if (filteredUsers.length === 0) {
+            console.log("Aucun utilisateur à assigner après le filtrage des administrateurs.");
+            return;
         }
 
-        await pubClient.hset(`team:${roomId}`, 'members', JSON.stringify(team.members));
-        
-        teams.push(team);
-    }
+        const teams = [];
+        let unassignedUsers = [...filteredUsers];
 
-    // Assigner les utilisateurs restants à des équipes (MIN_TEAM_SIZE)
-    while (unassignedUsers.length > 0) {
-        const roomId = uuidv4();
-        const team = new Team(roomId);
+        // Mélanger les utilisateurs
+        unassignedUsers.sort(() => Math.random() - 0.5);
 
-        while (team.getMemberCount() < MIN_TEAM_SIZE && unassignedUsers.length > 0) {
-            const user = unassignedUsers.pop();
-            team.addMember(user);
-            io.to(user.socketId).socketsJoin(roomId);
-            io.to(user.socketId).emit('roomAssigned', { roomId });
-        }
+        // Créer des équipes complètes (MAX_TEAM_SIZE)
+        while (unassignedUsers.length >= MAX_TEAM_SIZE) {
+            const roomId = uuidv4();
+            const team = new Team(roomId);
 
-        await pubClient.hset(`team:${roomId}`, 'members', JSON.stringify(team.members));
-        teams.push(team);
-    }
+            for (let i = 0; i < MAX_TEAM_SIZE; i++) {
+                const user = unassignedUsers.pop();
+                team.addMember(user);
+                io.to(user.socketId).socketsJoin(roomId);
+                io.to(user.socketId).emit('roomAssigned', {
+                    roomId
+                });
 
-    // Redistribuer les joueurs pour respecter MIN_TEAM_SIZE
-    const smallTeams = teams.filter(team => team.getMemberCount() < MIN_TEAM_SIZE);
-    const largeTeams = teams.filter(team => team.getMemberCount() === MAX_TEAM_SIZE);
-
-    for (const smallTeam of smallTeams) {
-        while (smallTeam.getMemberCount() < MIN_TEAM_SIZE && largeTeams.length > 0) {
-            const donorTeam = largeTeams[0];
-            const removedMember = donorTeam.removeMember();
-            if (removedMember) {
-                smallTeam.addMember(removedMember.userData); // Transférer les données utilisateur
-                io.to(removedMember.socket.id).socketsJoin(smallTeam.roomId);
-                io.to(removedMember.socket.id).emit('roomAssigned', { roomId: smallTeam.roomId });
+                // Sauvegarder l'utilisateur dans Redis pour recherche rapide
+                await pubClient.hset('userToRoom', user.user_id, roomId);
             }
 
-            //io.to(userToTransfer.socket.id).socketsJoin(smallTeam.roomId);
-            //io.to(userToTransfer.socket.id).emit('roomAssigned', { roomId: smallTeam.roomId });
+            await pubClient.hset(`team:${roomId}`, 'members', JSON.stringify(team.getMembers()));
 
-            if (donorTeam.getMemberCount() < MAX_TEAM_SIZE) {
-                largeTeams.shift(); // Retirer des grandes équipes si elles ne sont plus "grandes"
+            teams.push(team);
+        }
+
+        // Assigner les utilisateurs restants à des équipes (MIN_TEAM_SIZE)
+        while (unassignedUsers.length > 0) {
+            const roomId = uuidv4();
+            const team = new Team(roomId);
+
+            while (team.getMemberCount() < MIN_TEAM_SIZE && unassignedUsers.length > 0) {
+                const user = unassignedUsers.pop();
+                team.addMember(user);
+                io.to(user.socketId).socketsJoin(roomId);
+                io.to(user.socketId).emit('roomAssigned', {
+                    roomId
+                });
+            }
+
+            await pubClient.hset(`team:${roomId}`, 'members', JSON.stringify(team.getMembers()));
+            teams.push(team);
+        }
+
+        // Redistribuer les joueurs pour respecter MIN_TEAM_SIZE
+        const smallTeams = teams.filter(team => team.getMemberCount() < MIN_TEAM_SIZE);
+        const largeTeams = teams.filter(team => team.getMemberCount() === MAX_TEAM_SIZE);
+
+        for (const smallTeam of smallTeams) {
+            while (smallTeam.getMemberCount() < MIN_TEAM_SIZE && largeTeams.length > 0) {
+                const donorTeam = largeTeams[0];
+                const removedMember = donorTeam.removeMember();
+                if (removedMember) {
+                    smallTeam.addMember(removedMember.userData);
+                    io.to(removedMember.socket.id).socketsJoin(smallTeam.roomId);
+                    io.to(removedMember.socket.id).emit('roomAssigned', {
+                        roomId: smallTeam.roomId
+                    });
+                }
+
+                //io.to(userToTransfer.socket.id).socketsJoin(smallTeam.roomId);
+                //io.to(userToTransfer.socket.id).emit('roomAssigned', { roomId: smallTeam.roomId });
+
+                if (donorTeam.getMemberCount() < MAX_TEAM_SIZE) {
+                    largeTeams.shift(); // Retirer des grandes équipes si elles ne sont plus "grandes"
+                }
             }
         }
-    }
 
-    // Mettre à jour les rooms globalement
-    const rooms = teams.map(team => ({
-        roomId: team.roomId,
-        users: team.members.map(member => ({
-            id: member.socket.id,
-            username: member.userData.username,
-            user_id: member.userData.user_id,
-            user_uai: member.userData.user_uai,
-            user_ips: member.userData.user_ips,
-            user_genre: member.userData.user_genre,
-            user_avatar: member.userData.user_avatar
-        })),
-        averageIPS: team.getAverageIPS(),
-    }));
-
-    await pubClient.set('rooms', JSON.stringify(rooms));
-
-    io.emit('serverStatus', {
-        status: 'Rooms assignées',
-        rooms: rooms,
-        monitors: Array.from(monitors).map(socket => socket.id),
-    });
-    
-    // Émet "team members" pour chaque équipe
-    for (const team of teams) {
-        const teamMembers = team.members.map(member => ({
-            username: member.userData.username,
-            user_id: member.userData.user_id,
-            user_uai: member.userData.user_uai,
-            user_ips: member.userData.user_ips,
-            user_genre: member.userData.user_genre,
-            user_avatar: member.userData.user_avatar
+        // Mettre à jour les rooms globalement
+        const rooms = teams.map(team => ({
+            roomId: team.roomId,
+            users: team.getMembers().map(member => ({
+                id: member.socket.id,
+                username: member.userData.username,
+                user_id: member.userData.user_id,
+                user_uai: member.userData.user_uai,
+                user_ips: member.userData.user_ips,
+                user_genre: member.userData.user_genre,
+                user_avatar: member.userData.user_avatar
+            })),
+            averageIPS: team.getAverageIPS(),
         }));
 
-        for (const member of team.members) {
-            io.to(member.socket.id).emit('team members', {
-                roomId: team.roomId,
-                averageIPS: team.getAverageIPS(),
-                //members: teamMembers.filter(m => m.user_id !== member.userData.user_id), // Exclure le membre lui-même si nécessaire
-                members: teamMembers
-            });
+        await pubClient.set('rooms', JSON.stringify(rooms));
+
+        io.emit('serverStatus', {
+            status: 'Rooms assignées',
+            rooms: rooms,
+            monitors: Array.from(monitors).map(socket => socket.id),
+        });
+
+        // Émet "team members" pour chaque équipe
+        for (const team of teams) {
+            const teamMembers = team.getMembers().map(member => ({
+                username: member.userData.username,
+                user_id: member.userData.user_id,
+                user_uai: member.userData.user_uai,
+                user_ips: member.userData.user_ips,
+                user_genre: member.userData.user_genre,
+                user_avatar: member.userData.user_avatar
+            }));
+
+            for (const member of team.getMembers()) {
+                io.to(member.socket.id).emit('team members', {
+                    roomId: team.roomId,
+                    averageIPS: team.getAverageIPS(),
+                    //members: teamMembers.filter(m => m.user_id !== member.userData.user_id), // Exclure le membre lui-même si nécessaire
+                    members: teamMembers
+                });
+            }
         }
+
+        console.log(rooms);
     }
 
-    console.log(rooms);
-}
+    async function matchmaking() {
+        console.log("matchmaking---------------------");
+        const waitingUsers = (await pubClient.lrange('waitingUsers', 0, -1)).map(JSON.parse);
+        if (waitingUsers.length === 0) return;
 
+        await pubClient.del('waitingUsers');
+
+        // Exclure les administrateurs
+        const unassignedUsers = waitingUsers.filter(user => !adminUserIds.includes(user.user_id));
+
+        if (unassignedUsers.length === 0) {
+            console.log("Aucun utilisateur à assigner après le filtrage des administrateurs.");
+            return;
+        }
+
+        let teams = [...matchmakingProgress(unassignedUsers)];
+
+        // optimize: finding better way to batch value to Redis
+        for (const team of teams) {
+            let roomId = team.getRoomId()
+            for (const user of team.getMembers()) {
+                io.to(user.socketId).socketsJoin(team.getRoomId());
+                io.to(user.socketId).emit('roomAssigned', {
+                    roomId
+                });
+
+                await pubClient.hset('userToRoom', user.user_id, roomId);
+            }
+            await pubClient.hset(`team:${roomId}`, 'members', JSON.stringify(team.members));
+        }
+
+        const rooms = teams.map(team => ({
+            roomId: team.roomId,
+            users: team.getMembers().map(member => ({
+                id: member.socket.id,
+                username: member.userData.username,
+                user_id: member.userData.user_id,
+                user_uai: member.userData.user_uai,
+                user_ips: member.userData.user_ips,
+                user_genre: member.userData.user_genre,
+                user_avatar: member.userData.user_avatar
+            })),
+            averageIPS: team.getAverageIPS(),
+        }));
+
+        await pubClient.set('rooms', JSON.stringify(rooms));
+
+        io.emit('serverStatus', {
+            status: 'Rooms assignées',
+            rooms: rooms,
+            monitors: Array.from(monitors).map(socket => socket.id),
+        });
+
+        for (const team of teams) {
+            const teamMembers = team.getMembers().map(member => ({
+                username: member.userData.username,
+                user_id: member.userData.user_id,
+                user_uai: member.userData.user_uai,
+                user_ips: member.userData.user_ips,
+                user_genre: member.userData.user_genre,
+                user_avatar: member.userData.user_avatar
+            }));
+
+            for (const member of team.getMembers()) {
+                io.to(member.socket.id).emit('team members', {
+                    roomId: team.roomId,
+                    averageIPS: team.getAverageIPS(),
+                    //members: teamMembers.filter(m => m.user_id !== member.userData.user_id), // Exclure le membre lui-même si nécessaire
+                    members: teamMembers
+                });
+            }
+        }
+
+        console.log(rooms);
+    }
+
+    // io.use((socket, next) => {
+    //     const userData = {
+    //         username: socket.handshake.query.username,
+    //         user_id: parseInt(socket.handshake.query.user_id),
+    //         user_uai: socket.handshake.query.user_uai,
+    //         user_ips: parseInt(socket.handshake.query.user_ips),
+    //         user_genre: socket.handshake.query.user_genre,
+    //         user_avatar: socket.handshake.query.user_avatar
+    //     };
+    //     socket.handshake.auth = userData
+    //     next();
+    // });
 
     io.on('connection', async (socket) => {
         const userData = {
@@ -200,14 +310,16 @@ async function assignRooms() {
         };
 
         console.log(`Nouvelle connexion : ${JSON.stringify(userData)}`);
-        
+
         try {
             // Vérifier si l'utilisateur appartient déjà à une équipe
             const roomId = await pubClient.hget('userToRoom', userData.user_id);
             if (roomId) {
                 console.log(`Utilisateur ${userData.username} réaffecté à la room ${roomId}`);
                 socket.join(roomId);
-                socket.emit('roomAssigned', { roomId });
+                socket.emit('roomAssigned', {
+                    roomId
+                });
             } else {
                 // Ajouter l'utilisateur à la liste d'attente s'il n'est pas admin
                 if (!adminUserIds.includes(userData.user_id)) {
@@ -218,23 +330,40 @@ async function assignRooms() {
             console.error('Erreur lors de la connexion utilisateur:', err);
         }
 
-        
-        
         socket.on('chat message', (data) => {
-            const { room, message } = data;
+            const {
+                room,
+                message
+            } = data;
             console.log(`Message de ${socket.id} dans la room ${room}: ${message}`);
-            io.to(room).emit('chat message', { user: socket.id, message });
+            io.to(room).emit('chat message', {
+                user: socket.id,
+                message
+            });
         });
-        
+
         socket.on('patch picture', (data) => {
-            const { room, message } = data;
+            const {
+                room,
+                message
+            } = data;
             console.log(`patch picture de ${socket.id} dans la room ${room}: ${message}`);
-            io.to(room).emit('patch picture', { user: socket.id, message });
+            io.to(room).emit('patch picture', {
+                user: socket.id,
+                message
+            });
         });
-        
+
         socket.on('patch voting', async (data) => {
-            const { room, message } = data;
-            const { user_ID, username, imageAuthor } = message;
+            const {
+                room,
+                message
+            } = data;
+            const {
+                user_ID,
+                username,
+                imageAuthor
+            } = message;
 
             console.log(`Vote reçu de ${socket.id} dans la room ${room}: ${JSON.stringify(message)}`);
 
@@ -302,9 +431,9 @@ async function assignRooms() {
                 socket.emit('error', 'Erreur lors du traitement des votes.');
             }
         });
-        
-        
-        
+
+
+
         socket.on('joinMonitor', async (data) => {
             if (data.id === 'monitor_client') {
                 monitors.add(socket);
@@ -326,7 +455,8 @@ async function assignRooms() {
             if (adminUserIds.includes(userData.user_id)) {
                 console.log(`Utilisateur autorisé ${userData.user_id} a déclenché le démarrage du jeu.`);
                 gameStarted = true;
-                await assignRooms();
+                // await assignRooms();                
+                await matchmaking();
             } else {
                 socket.emit('error', 'Vous n\'êtes pas autorisé à démarrer le jeu.');
             }
@@ -352,7 +482,7 @@ async function assignRooms() {
             monitors.delete(socket);
         });
     });
-    
+
     /*
     const gracefulShutdown = () => {
         console.log('Received kill signal, shutting down gracefully');
@@ -367,7 +497,7 @@ async function assignRooms() {
         }, 10000);
     };
     */
-    
+
     const gracefulShutdown = async () => {
         console.log('Received kill signal, shutting down gracefully');
 
@@ -400,8 +530,8 @@ async function assignRooms() {
             console.error('Could not close connections in time, forcefully shutting down');
             process.exit(1);
         }, 10000);
-    };    
-    
+    };
+
     process.on('SIGTERM', gracefulShutdown);
     process.on('SIGINT', gracefulShutdown);
 
