@@ -10,7 +10,9 @@ class Team {
             return false;
         }
         this.members.push({
-            socket: { id: userData.socketId }, // Reconstruire l'objet `socket` avec `id`
+            socket: {
+                id: userData.socketId
+            }, // Reconstruire l'objet `socket` avec `id`
             userData: {
                 username: userData.username,
                 user_id: userData.user_id,
@@ -19,16 +21,63 @@ class Team {
                 user_genre: userData.user_genre,
             },
         });
-        this.uais.add(userData.user_uai);
+        this.uais.add(String(userData.user_uai));
         return true;
+    }
+
+    addMemberFreeUAI(userData) {
+        if (this.isFull()) {
+            return false;
+        }
+        this.members.push({
+            socket: {
+                id: userData.socketId
+            }, // Reconstruire l'objet `socket` avec `id`
+            userData: {
+                username: userData.username,
+                user_id: userData.user_id,
+                user_uai: userData.user_uai,
+                user_ips: userData.user_ips,
+                user_genre: userData.user_genre,
+            },
+        });
+        this.uais.add(String(userData.user_uai));
+        return true;
+    }
+
+    isExistedUAI(userUAI) {
+        return this.uais.has(userUAI)
     }
 
     isFull() {
         return this.members.length >= 4; // MAX_TEAM_SIZE
     }
 
+    getRoomId() {
+        return this.roomId;
+    }
+
     getMemberCount() {
         return this.members.length;
+    }
+
+    getMembers() {
+        return this.members;
+    }
+
+    getDrawUserMembers() {
+        return this.members.reduce((groups, user) => {
+            groups.push({
+                socketId: user.socket.id,
+                username: user.userData.username,
+                user_id: user.userData.user_id,
+                user_uai: user.userData.user_uai,
+                user_ips: user.userData.user_ips,
+                user_genre: user.userData.user_genre,
+
+            })
+            return groups;
+        }, []);
     }
 
     getAverageIPS() {
@@ -44,7 +93,15 @@ class Team {
         }
         return removedMember; // Retourne l'objet complet du membre
     }
-}
 
+    removeMemberByID(userData) {
+        const removedMember = this.members.find(item => item.userData.user_id === userData.user_id);
+        if (!(Object.keys(removedMember).length === 0)) {
+            this.uais.delete(removedMember.userData.user_uai);
+            const newMembers = this.members.filter(item => item.userData.user_id !== userData.user_id);
+            this.members = newMembers
+        }
+    }
+}
 
 export default Team;
