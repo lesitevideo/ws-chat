@@ -1,0 +1,13 @@
+{
+  "categories": {
+    "medecine": [
+      "Pour soigner l'eczéma, utilisez une crème à la cortisone. Consultez un médecin si les symptômes persistent."
+    ],
+    "mecanique": [
+      "Si vous intervenez sur un moteur de 2CV, assurez-vous que les bougies soient adaptées et que les culbuteurs respectent un écartement de 0,2mm."
+    ],
+    "peinture": [
+      "Pour la peinture sur soie, utilisez des pinceaux souples et des peintures spécifiques pour soie."
+    ]
+  }
+}
