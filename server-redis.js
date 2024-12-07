@@ -53,9 +53,9 @@ if (cluster.isMaster) {
     const redisHost = '127.0.0.1';
     const redisPort = 6379;
     const redisSocketPath = '/home/sites/astro/redis/redis.sock';
-    
+
     //const pubClient = new Redis({ host: redisHost, port: redisPort });
-    
+
     const redisOptions = {
         path: redisSocketPath, // Utilisez path pour spécifier la socket UNIX
         retryStrategy: (times) => Math.min(times * 50, 2000), // Backoff exponentiel
@@ -67,18 +67,18 @@ if (cluster.isMaster) {
 
     // Création du client Redis
     const pubClient = new Redis(redisOptions);
-    
+
     pubClient.on('connect', () => {
         console.log('Redis client connected via UNIX socket');
     });
 
-    
+
     const subClient = pubClient.duplicate();
-    
+
     subClient.on('error', (err) => {
         console.error('Redis Sub Client Error:', err);
     });
-    
+
     subClient.on('connect', () => {
         console.log('Redis Sub Client Connected');
     });
@@ -94,20 +94,23 @@ if (cluster.isMaster) {
         }
     });
     io.adapter(createAdapter(pubClient, subClient));*/
-    
+
     const io = new Server(server, {
         path: '/ws/socket.io',
-        transports: ['polling', 'websocket'], 
+        transports: ['polling', 'websocket'],
         allowUpgrades: true,
         pingTimeout: 120000, // Étendre le délai d'inactivité avant déconnexion
         pingInterval: 30000, // Ping pour vérifier la connexion toutes les 30 secondes
-        cors: { origin: '*', methods: ['GET', 'POST'] },
+        cors: {
+            origin: '*',
+            methods: ['GET', 'POST']
+        },
         adapter: createAdapter(pubClient, subClient),
         connectionStateRecovery: {
             maxDisconnectionDuration: 120000, // Temps alloué à une reconnexion
             skipMiddlewares: true, // Ne pas repasser par les middlewares
         },
-    });     
+    });
 
     const port = 3001;
     let gameStarted = false;
@@ -268,12 +271,12 @@ if (cluster.isMaster) {
         for (const team of teams) {
             let roomId = team.getRoomId()
             for (const user of team.getMembers()) {
-                io.to(user.socketId).socketsJoin(team.getRoomId());
-                io.to(user.socketId).emit('roomAssigned', {
+                io.to(user.socket.id).socketsJoin(team.getRoomId());
+                io.to(user.socket.id).emit('roomAssigned', {
                     roomId
                 });
 
-                await pubClient.hset('userToRoom', user.user_id, roomId);
+                await pubClient.hset('userToRoom', user.userData.user_id, roomId);
             }
             await pubClient.hset(`team:${roomId}`, 'members', JSON.stringify(team.members));
         }
@@ -367,7 +370,7 @@ if (cluster.isMaster) {
         } catch (err) {
             console.error('Erreur lors de la connexion utilisateur:', err);
         }
-        
+
         /*
         socket.on('chat message', (data) => {
             const {
@@ -381,9 +384,12 @@ if (cluster.isMaster) {
             });
         });
         */
-        
+
         socket.on('chat message', (data) => {
-            const { room, message } = data;
+            const {
+                room,
+                message
+            } = data;
 
             // Vérifie si l'utilisateur est dans une room ou non
             if (room) {
@@ -395,10 +401,16 @@ if (cluster.isMaster) {
                     if (!command) {
                         const categories = Object.keys(jsonData.categories);
                         const response = `Je peux vous aider pour : ${categories.join(', ')}. Tapez un mot-clé pour en savoir plus.`;
-                        io.to(room).emit('chat message', { user: 'chatbot', message: response });
+                        io.to(room).emit('chat message', {
+                            user: 'chatbot',
+                            message: response
+                        });
                     } else if (jsonData.categories[command]) {
                         const response = jsonData.categories[command].join('\n');
-                        io.to(room).emit('chat message', { user: 'chatbot', message: response });
+                        io.to(room).emit('chat message', {
+                            user: 'chatbot',
+                            message: response
+                        });
                     } else {
                         io.to(room).emit('chat message', {
                             user: 'chatbot',
@@ -406,7 +418,10 @@ if (cluster.isMaster) {
                         });
                     }
                 } else {
-                    io.to(room).emit('chat message', { user: socket.id, message });
+                    io.to(room).emit('chat message', {
+                        user: socket.id,
+                        message
+                    });
                 }
             } else {
                 console.log(`Message de ${socket.id} hors room: ${message}`);
@@ -416,10 +431,16 @@ if (cluster.isMaster) {
                     if (!command) {
                         const categories = Object.keys(jsonData.categories);
                         const response = `Je peux vous aider pour : ${categories.join(', ')}. Tapez chatbot/ puis un mot-clé pour en savoir plus, par exemple chatbot/mecanique.`;
-                        socket.emit('chat message', { user: 'chatbot', message: response });
+                        socket.emit('chat message', {
+                            user: 'chatbot',
+                            message: response
+                        });
                     } else if (jsonData.categories[command]) {
                         const response = jsonData.categories[command].join('\n');
-                        socket.emit('chat message', { user: 'chatbot', message: response });
+                        socket.emit('chat message', {
+                            user: 'chatbot',
+                            message: response
+                        });
                     } else {
                         socket.emit('chat message', {
                             user: 'chatbot',
@@ -433,10 +454,10 @@ if (cluster.isMaster) {
                     });
                 }
             }
-        });        
-        
-        
-        
+        });
+
+
+
         socket.on('patch picture', (data) => {
             const {
                 room,
@@ -556,8 +577,8 @@ if (cluster.isMaster) {
                 socket.emit('error', 'Vous n\'êtes pas autorisé à démarrer le jeu.');
             }
         });
-        
-        
+
+
         socket.on('stopgame', async () => {
             if (!adminUserIds.includes(userData.user_id)) {
                 socket.emit('error', 'Vous n\'êtes pas autorisé à arrêter le jeu.');
@@ -567,13 +588,15 @@ if (cluster.isMaster) {
             if (!gameStarted) {
                 socket.emit('error', 'Le jeu n\'a pas encore commencé.');
                 return;
-            }   
-            
+            }
+
             try {
                 console.log(`Utilisateur autorisé ${userData.user_id} a déclenché l'arrêt du jeu.`);
 
                 // Envoyer l'événement "jeu terminé" à tous les clients
-                io.emit('gameStatus', { status: 'jeu terminé' });
+                io.emit('gameStatus', {
+                    status: 'jeu terminé'
+                });
 
                 // Supprimer toutes les clés liées au jeu dans Redis
                 const patterns = ['userToRoom', 'waitingUsers', 'team:*', 'rooms'];
@@ -600,10 +623,10 @@ if (cluster.isMaster) {
                 console.error('Erreur lors de l\'arrêt du jeu :', err);
                 socket.emit('error', 'Erreur lors de l\'arrêt du jeu.');
             }
-        });        
-        
-        
-        
+        });
+
+
+
 
         socket.on('get_teams', async () => {
             if (!adminUserIds.includes(userData.user_id)) {
